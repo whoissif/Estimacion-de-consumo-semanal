@@ -705,6 +705,8 @@ function analyzeConsumptionPattern() {
     const initialPower = initialPhase.reduce((sum, item) => sum + item.power, 0) / initialPhase.length;
     const maintenancePower = maintenancePhase.length > 0 ? 
         maintenancePhase.reduce((sum, item) => sum + item.power, 0) / maintenancePhase.length : 600;
+	// Actualizar el campo de entrada con el valor calculado
+	document.getElementById('maintenance-power').value = Math.round(maintenancePower);
     
     // Crear patrón horario basado en los datos
     const hourlyPattern = Array.from({length: 24}, (_, hour) => {
