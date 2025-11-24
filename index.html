@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estimador de Consumo de Aire Acondicionado</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1/build/global/luxon.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>📊 Estimador de Consumo de Aire Acondicionado</h1>
+            <p class="subtitle">Análisis avanzado con pronóstico meteorológico y cálculo de costes</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" data-tab="data">Datos y Carga</div>
+            <div class="tab" data-tab="analysis">Análisis y Pronóstico</div>
+            <div class="tab" data-tab="results">Resultados y Optimización</div>
+        </div>
+
+        <div class="tab-content active" id="data-tab">
+            <div class="dashboard">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📂 Cargar Datos de Consumo</div>
+                        <div class="card-icon">⚡</div>
+                    </div>
+                    <div class="upload-area" id="drop-area">
+                        <div class="upload-icon">↑</div>
+                        <p class="upload-text">Arrastra tus archivos Excel aquí o haz clic para seleccionar</p>
+                        <input type="file" id="file-input" accept=".xlsx, .xls" style="display: none;">
+                        <button class="upload-button" id="select-button">Seleccionar Archivo</button>
+                    </div>
+                    <div id="file-info"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🔍 Vista Previa de Datos</div>
+                        <div class="card-icon">📊</div>
+                    </div>
+                    <div class="data-preview">
+                        <p>Sube un archivo para ver la vista previa de los datos</p>
+                        <div id="data-table"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📈 Consumo por Horas</div>
+                        <div class="card-icon">⏱️</div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="consumption-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="analysis-tab">
+            <div class="dashboard">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">🌡️ Configuración de Temperatura</div>
+                        <div class="card-icon">🌡️</div>
+                    </div>
+                    <div class="control-group">
+                        <label for="target-temp">Temperatura Objetivo Interior (°C)</label>
+                        <input type="number" id="target-temp" value="18" min="16" max="24" step="0.5">
+                    </div>
+                    <div class="control-group">
+                        <label for="location">Ubicación para Pronóstico</label>
+                        <input type="text" id="location" value="San Martín de Valdeiglesias, Madrid" readonly>
+                    </div>
+                    <button class="secondary" id="generate-forecast">Generar Pronóstico Meteorológico</button>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📅 Pronóstico Meteorológico</div>
+                        <div class="card-icon">🌤️</div>
+                    </div>
+                    <div id="weather-loading" class="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>Cargando pronóstico meteorológico...</p>
+                    </div>
+                    <div id="weather-forecast" class="weather-forecast">
+                        <p>Haz clic en "Generar Pronóstico Meteorológico" para ver los datos</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">⚙️ Parámetros de Cálculo</div>
+                        <div class="card-icon">⚙️</div>
+                    </div>
+                    <div class="controls">
+                        <div class="control-group">
+                            <label for="week-days">Días Laborables</label>
+                            <select id="week-days">
+                                <option value="5">5 días (Lun-Vie)</option>
+                                <option value="6" selected>6 días (Lun-Sáb)</option>
+                                <option value="7">7 días</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label for="consumption-factor">Factor de Ajuste por Temperatura</label>
+                            <input type="number" id="consumption-factor" value="0.03" min="0.01" max="0.1" step="0.01">
+                            <small>Consumo adicional por cada grado de diferencia</small>
+                        </div>
+                        <div class="control-group">
+                            <label for="maintenance-power">Potencia en Modo Mantenimiento (W)</label>
+                            <input type="number" id="maintenance-power" value="610" min="300" max="1500" step="10">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-content" id="results-tab">
+            <div class="dashboard">
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">💰 Cálculo de Costes</div>
+                        <div class="card-icon">💶</div>
+                    </div>
+                    <div class="control-group">
+                        <label for="tariff-type">Tipo de Tarifa</label>
+                        <select id="tariff-type">
+                            <option value="pvpc">PVPC (Precio Voluntario Pequeño Consumidor)</option>
+                            <option value="fixed">Tarifa Fija</option>
+                        </select>
+                    </div>
+                    <div id="pvpc-prices">
+                        <div class="control-group">
+                            <label for="valle-price">Precio Valle (22:00-8:00)</label>
+                            <input type="number" id="valle-price" value="0.105" step="0.001">
+                        </div>
+                        <div class="control-group">
+                            <label for="llano-price">Precio Llano (8:00-10:00, 14:00-18:00)</label>
+                            <input type="number" id="llano-price" value="0.148" step="0.001">
+                        </div>
+                        <div class="control-group">
+                            <label for="punta-price">Precio Punta (10:00-14:00, 18:00-22:00)</label>
+                            <input type="number" id="punta-price" value="0.192" step="0.001">
+                        </div>
+                    </div>
+                    <button class="success" id="calculate-cost">Calcular Costes Semanales</button>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">📊 Resultados de la Estimación</div>
+                        <div class="card-icon">📈</div>
+                    </div>
+                    <div id="results-loading" class="loading" style="display: none;">
+                        <div class="spinner"></div>
+                        <p>Calculando estimación semanal...</p>
+                    </div>
+                    <div class="results" id="estimation-results">
+                        <div class="result-row">
+                            <span>Consumo Estimado:</span>
+                            <span id="weekly-consumption">-- kWh</span>
+                        </div>
+                        <div class="result-row">
+                            <span>Coste Energía:</span>
+                            <span id="energy-cost">-- €</span>
+                        </div>
+                        <div class="result-row">
+                            <span>Impuesto Eléctrico:</span>
+                            <span id="electric-tax">-- €</span>
+                        </div>
+                        <div class="result-row">
+                            <span>IVA (21%):</span>
+                            <span id="iva-cost">-- €</span>
+                        </div>
+                        <div class="result-row">
+                            <span><strong>Coste Total Semanal:</strong></span>
+                            <span id="total-cost"><strong>-- €</strong></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">💡 Recomendaciones de Optimización</div>
+                        <div class="card-icon">💡</div>
+                    </div>
+                    <div id="optimization-tips">
+                        <ul>
+                            <li>Sube la temperatura 1°C para ahorrar hasta un 8% en consumo</li>
+                            <li>Programa temperaturas más bajas durante horas valle (22:00-8:00)</li>
+                            <li>Usa el modo eco cuando no haya ocupación prolongada</li>
+                            <li>Mantén los filtros limpios para mejorar la eficiencia en un 15%</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title">📈 Gráfico de Consumo Estimado por Día</div>
+                    <div class="card-icon">📊</div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="weekly-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <div class="container">
+            <p>Estimador de Consumo de Aire Acondicionado • Datos actualizados a Noviembre 2025</p>
+            <p>Nota: Los cálculos son estimaciones basadas en los datos proporcionados y pronósticos meteorológicos históricos</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
