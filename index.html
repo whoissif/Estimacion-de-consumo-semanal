@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/luxon@3.0.1/build/global/luxon.min.js"></script>
 </head>
 <body>
     <header>
@@ -67,6 +66,24 @@
             <div class="dashboard">
                 <div class="card">
                     <div class="card-header">
+                        <div class="card-title">📍 Ubicación para Pronóstico</div>
+                        <div class="card-icon">🌍</div>
+                    </div>
+                    <div class="control-group">
+                        <label for="location">Ubicación para el pronóstico meteorológico</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="location" value="San Martín de Valdeiglesias, Madrid">
+                            <button class="secondary" id="reset-location" style="width: auto; padding: 8px 12px; margin-top: 0;">↺</button>
+                        </div>
+                        <small style="color: #7f8c8d; display: block; margin-top: 8px;">
+                            Ingresa una ciudad o utiliza la ubicación por defecto para mayor precisión
+                        </small>
+                    </div>
+                    <button class="secondary" id="generate-forecast" style="margin-top: 15px;">Generar Pronóstico Meteorológico</button>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
                         <div class="card-title">🌡️ Configuración de Temperatura</div>
                         <div class="card-icon">🌡️</div>
                     </div>
@@ -75,10 +92,14 @@
                         <input type="number" id="target-temp" value="18" min="16" max="24" step="0.5">
                     </div>
                     <div class="control-group">
-                        <label for="location">Ubicación para Pronóstico</label>
-                        <input type="text" id="location" value="San Martín de Valdeiglesias, Madrid" readonly>
+                        <label for="consumption-factor">Factor de Ajuste por Temperatura</label>
+                        <input type="number" id="consumption-factor" value="0.03" min="0.01" max="0.1" step="0.01">
+                        <small>Consumo adicional por cada grado de diferencia</small>
                     </div>
-                    <button class="secondary" id="generate-forecast">Generar Pronóstico Meteorológico</button>
+                    <div class="control-group">
+                        <label for="maintenance-power">Potencia en Modo Mantenimiento (W)</label>
+                        <input type="number" id="maintenance-power" value="610" min="300" max="1500" step="10">
+                    </div>
                 </div>
 
                 <div class="card">
@@ -92,32 +113,6 @@
                     </div>
                     <div id="weather-forecast" class="weather-forecast">
                         <p>Haz clic en "Generar Pronóstico Meteorológico" para ver los datos</p>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <div class="card-header">
-                        <div class="card-title">⚙️ Parámetros de Cálculo</div>
-                        <div class="card-icon">⚙️</div>
-                    </div>
-                    <div class="controls">
-                        <div class="control-group">
-                            <label for="week-days">Días Laborables</label>
-                            <select id="week-days">
-                                <option value="5">5 días (Lun-Vie)</option>
-                                <option value="6" selected>6 días (Lun-Sáb)</option>
-                                <option value="7">7 días</option>
-                            </select>
-                        </div>
-                        <div class="control-group">
-                            <label for="consumption-factor">Factor de Ajuste por Temperatura</label>
-                            <input type="number" id="consumption-factor" value="0.03" min="0.01" max="0.1" step="0.01">
-                            <small>Consumo adicional por cada grado de diferencia</small>
-                        </div>
-                        <div class="control-group">
-                            <label for="maintenance-power">Potencia en Modo Mantenimiento (W)</label>
-                            <input type="number" id="maintenance-power" value="610" min="300" max="1500" step="10">
-                        </div>
                     </div>
                 </div>
             </div>
@@ -222,6 +217,7 @@
         </div>
     </footer>
 
-    <script src="script.js"></script>
+    <div id="notification-container"></div>
+    <script src="estimador.js"></script>
 </body>
 </html>

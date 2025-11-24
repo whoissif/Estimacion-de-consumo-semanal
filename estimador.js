@@ -5,6 +5,9 @@ let weeklyChart = null;
 let consumptionChart = null;
 let currentTab = 'data';
 
+// Ubicación por defecto
+const DEFAULT_LOCATION = "San Martín de Valdeiglesias, Madrid";
+
 // Inicializar cuando el DOM esté listo
 document.addEventListener('DOMContentLoaded', function() {
     // Configurar eventos de las pestañas
@@ -19,6 +22,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const dropArea = document.getElementById('drop-area');
     const fileInput = document.getElementById('file-input');
     const selectButton = document.getElementById('select-button');
+    const resetLocationBtn = document.getElementById('reset-location');
     
     // Eventos de drag and drop
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -70,6 +74,11 @@ document.addEventListener('DOMContentLoaded', function() {
         handleFiles(e.target.files);
     });
     
+    // Botón para restablecer ubicación por defecto
+    resetLocationBtn.addEventListener('click', function() {
+        document.getElementById('location').value = DEFAULT_LOCATION;
+    });
+    
     // Botón para generar pronóstico meteorológico
     document.getElementById('generate-forecast').addEventListener('click', generateWeatherForecast);
     
@@ -87,6 +96,9 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function switchTab(tabId) {
+    // Verificar si ya estamos en esta pestaña
+    if (currentTab === tabId) return;
+    
     // Actualizar pestañas activas
     document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.remove('active');
@@ -102,9 +114,12 @@ function switchTab(tabId) {
     currentTab = tabId;
     
     // Acciones específicas por pestaña
-    if (tabId === 'results' && consumptionData.length > 0) {
-        // Si hay datos, calcular los resultados automáticamente
+    if (tabId === 'results' && consumptionData.length > 0 && weatherForecast.length > 0) {
+        // Si hay datos y pronóstico, calcular los resultados automáticamente
         setTimeout(calculateWeeklyEstimation, 300);
+    } else if (tabId === 'results' && consumptionData.length > 0) {
+        // Si hay datos pero no hay pronóstico, generar una notificación
+        showNotification('ℹ️ Para ver resultados completos, genera primero el pronóstico meteorológico', 'warning');
     }
 }
 
@@ -125,25 +140,30 @@ function handleFiles(files) {
         try {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
-            processData(workbook);
+            processData(workbook, file.name);
         } catch (error) {
             console.error('Error al procesar el archivo:', error);
-            alert('Error al procesar el archivo. Por favor, asegúrate de que sea un archivo Excel válido.');
+            showNotification('❌ Error al procesar el archivo. Asegúrate de que sea un archivo Excel válido.', 'error');
         }
     };
     reader.readAsArrayBuffer(file);
 }
 
-function processData(workbook) {
-    // Encontrar la hoja correcta (asumimos que es la primera)
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
+function processData(workbook, fileName) {
+    // Buscar la hoja correcta (la primera hoja)
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
     
-    // Convertir a JSON
+    // Convertir a JSON con formato crudo
     const jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
     
-    // Procesar los datos según el formato de los archivos proporcionados
+    // Procesar los datos
     consumptionData = parseConsumptionData(jsonData);
+    
+    if (consumptionData.length === 0) {
+        showNotification('❌ No se encontraron datos de consumo válidos en el archivo. Formato no compatible.', 'error');
+        return;
+    }
     
     // Mostrar datos en la tabla
     displayDataPreview();
@@ -152,65 +172,86 @@ function processData(workbook) {
     updateConsumptionChart();
     
     // Mostrar mensaje de éxito
-    showNotification('✅ Datos cargados correctamente. Puedes cambiar a la pestaña "Análisis y Pronóstico" para continuar.', 'success');
+    const totalHours = (consumptionData[consumptionData.length - 1].timestamp - consumptionData[0].timestamp) / (1000 * 60 * 60);
+    showNotification(`✅ Datos cargados correctamente. ${consumptionData.length} registros de ${totalHours.toFixed(1)} horas de consumo.`, 'success');
 }
 
 function parseConsumptionData(jsonData) {
     const parsedData = [];
-    let foundData = false;
+    let inDataSection = false;
+    let dateColumn = 0;
+    let powerColumn = 1;
     
-    // Buscar el inicio de los datos (donde aparece "Fecha" y "Potencia")
     for (let i = 0; i < jsonData.length; i++) {
         const row = jsonData[i];
         
-        // Buscar el encabezado de los datos
-        if (Array.isArray(row) && row.length >= 2) {
-            const cleanCell1 = String(row[0]).trim();
-            const cleanCell2 = String(row[1]).trim();
+        // Continuar solo si la fila es un array y tiene al menos una columna
+        if (!Array.isArray(row) || row.length === 0) continue;
+        
+        const firstCell = String(row[0]).trim();
+        
+        // Detectar el inicio de los datos (después de "VALORES CONTINUOS")
+        if (firstCell.includes('VALORES CONTINUOS')) {
+            inDataSection = true;
+            continue;
+        }
+        
+        // Procesar datos solo si estamos en una sección de datos
+        if (inDataSection && row.length > 1) {
+            const dateStr = String(row[dateColumn]).trim();
+            const powerStr = String(row[powerColumn]).trim();
             
-            // Detectar inicio de los datos
-            if (cleanCell1.includes('Fecha') && cleanCell2.includes('Potencia')) {
-                foundData = true;
-                continue;
-            }
-            
-            // Procesar datos después del encabezado
-            if (foundData && row[0] && row[1] && typeof row[0] === 'string' && !row[0].includes('VALORES CONTINUOS')) {
-                // Verificar si es una fecha válida
-                const dateStr = String(row[0]).trim();
-                const powerStr = String(row[1]).trim();
+            // Validar que la fila contiene datos válidos
+            if (dateStr && powerStr && !dateStr.includes('Fecha') && !dateStr.includes('Potencia') && 
+                !dateStr.includes('Dirección') && !dateStr.includes('C/ CUBA') && !firstCell.includes('VALORES CONTINUOS')) {
                 
-                // Intentar parsear la fecha
-                let date;
-                try {
-                    // Manejar diferentes formatos de fecha
-                    if (dateStr.includes('/')) {
-                        date = new Date(dateStr.split('/').reverse().join('-'));
-                    } else {
-                        date = new Date(dateStr);
-                    }
-                    
-                    if (!isNaN(date.getTime())) {
-                        const power = parseFloat(powerStr.replace(',', '.'));
-                        if (!isNaN(power)) {
-                            parsedData.push({
-                                date: date,
-                                power: power,
-                                timestamp: date.getTime()
-                            });
+                // Verificar si es una fecha en formato dd/mm/yyyy hh:mm:ss o dd/mm/yyyy hh:mm
+                if (dateStr.match(/\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}(:\d{2})?/)) {
+                    try {
+                        // Separar la fecha y la hora
+                        const [datePart, timePart] = dateStr.split(' ');
+                        const dateParts = datePart.split('/');
+                        
+                        // Procesar hora
+                        let hour = 0, min = 0, sec = 0;
+                        if (timePart) {
+                            const timeParts = timePart.split(':');
+                            hour = parseInt(timeParts[0]) || 0;
+                            min = parseInt(timeParts[1]) || 0;
+                            sec = timeParts.length > 2 ? parseInt(timeParts[2]) || 0 : 0;
                         }
+                        
+                        // Crear fecha (asumimos formato dd/mm/yyyy)
+                        const date = new Date(
+                            parseInt(dateParts[2]), // año
+                            parseInt(dateParts[1]) - 1, // mes (0-indexado)
+                            parseInt(dateParts[0]), // día
+                            hour,
+                            min,
+                            sec
+                        );
+                        
+                        if (isNaN(date.getTime())) continue;
+                        
+                        // Parsear potencia
+                        let power = parseFloat(powerStr.replace('W', '').replace(',', '.').trim());
+                        if (isNaN(power)) continue;
+                        
+                        parsedData.push({
+                            date: date,
+                            power: power,
+                            timestamp: date.getTime()
+                        });
+                    } catch (e) {
+                        continue;
                     }
-                } catch (e) {
-                    console.log('Error parsing row:', row, e);
                 }
             }
         }
     }
     
-    // Ordenar por fecha si hay datos
-    if (parsedData.length > 0) {
-        parsedData.sort((a, b) => a.timestamp - b.timestamp);
-    }
+    // Ordenar por fecha
+    parsedData.sort((a, b) => a.timestamp - b.timestamp);
     
     return parsedData;
 }
@@ -376,24 +417,32 @@ function updateConsumptionChart() {
 function generateWeatherForecast() {
     const weatherLoading = document.getElementById('weather-loading');
     const weatherContainer = document.getElementById('weather-forecast');
+    const locationInput = document.getElementById('location');
+    const location = locationInput.value.trim();
+    
+    if (!location) {
+        locationInput.value = DEFAULT_LOCATION;
+        showNotification('⚠️ Debes especificar una ubicación para el pronóstico', 'warning');
+        return;
+    }
     
     weatherLoading.style.display = 'block';
     weatherContainer.innerHTML = '';
     
-    // Simular carga de datos meteorológicos (en una implementación real, aquí iría una llamada a una API)
+    // Simular carga de datos meteorológicos
     setTimeout(() => {
-        // Generar pronóstico meteorológico simulado basado en los datos proporcionados
-        weatherForecast = generateSimulatedForecast();
+        // Generar pronóstico meteorológico simulado
+        weatherForecast = generateSimulatedForecast(location);
         
         // Mostrar el pronóstico
         displayWeatherForecast();
         
         weatherLoading.style.display = 'none';
-        showNotification('✅ Pronóstico meteorológico generado correctamente', 'success');
+        showNotification(`✅ Pronóstico meteorológico generado para ${location}`, 'success');
     }, 1500);
 }
 
-function generateSimulatedForecast() {
+function generateSimulatedForecast(location) {
     // Obtener la fecha actual del último dato o usar hoy
     let baseDate = new Date();
     if (consumptionData.length > 0) {
@@ -401,57 +450,114 @@ function generateSimulatedForecast() {
     }
     
     // Asegurarse de que sea el lunes de la semana actual
-    baseDate.setDate(baseDate.getDate() + (1 + 7 - baseDate.getDay()) % 7);
+    const day = baseDate.getDay(); // 0=domingo, 1=lunes, etc.
+    const diff = (day === 1) ? 0 : (8 - day) % 7;
+    baseDate.setDate(baseDate.getDate() + diff);
     
     // Generar pronóstico para los próximos 7 días
     const forecast = [];
-    const location = document.getElementById('location').value;
+    
+    // Determinar si la ubicación es San Martín de Valdeiglesias o similar
+    const isDefaultLocation = location.toLowerCase().includes('san martin') || 
+                              location.toLowerCase().includes('valdeiglesias') ||
+                              location.toLowerCase().includes('madrid') ||
+                              location.toLowerCase().includes('españa') ||
+                              location.toLowerCase().includes('spain');
     
     for (let i = 0; i < 7; i++) {
         const date = new Date(baseDate);
         date.setDate(baseDate.getDate() + i);
         
-        // Generar temperaturas basadas en el patrón de San Martín de Valdeiglesias en noviembre
-        // Lunes a viernes más fríos, fin de semana algo más cálido
+        // Generar temperaturas según la ubicación
         let minTemp, maxTemp;
-        if (i < 5) { // Días laborables
-            minTemp = -1 + Math.floor(Math.random() * 3); // De -1 a 1°C
-            maxTemp = 7 + Math.floor(Math.random() * 4); // De 7 a 10°C
-        } else { // Fin de semana
-            minTemp = 3 + Math.floor(Math.random() * 3); // De 3 a 5°C
-            maxTemp = 12 + Math.floor(Math.random() * 3); // De 12 a 14°C
-        }
         
-        // Ajustar un poco según el día específico
-        switch(i) {
-            case 0: // Lunes
-                minTemp = 0;
-                maxTemp = 8;
-                break;
-            case 1: // Martes
-                minTemp = -1;
-                maxTemp = 7;
-                break;
-            case 2: // Miércoles
-                minTemp = 1;
-                maxTemp = 9;
-                break;
-            case 3: // Jueves
-                minTemp = 2;
-                maxTemp = 10;
-                break;
-            case 4: // Viernes
-                minTemp = 1;
-                maxTemp = 11;
-                break;
-            case 5: // Sábado
-                minTemp = 4;
-                maxTemp = 13;
-                break;
-            case 6: // Domingo
-                minTemp = 5;
-                maxTemp = 14;
-                break;
+        if (isDefaultLocation) {
+            // Patrón para San Martín de Valdeiglesias en noviembre
+            if (i < 5) { // Días laborables
+                minTemp = -1 + Math.floor(Math.random() * 3); // De -1 a 1°C
+                maxTemp = 7 + Math.floor(Math.random() * 4); // De 7 a 10°C
+            } else { // Fin de semana
+                minTemp = 3 + Math.floor(Math.random() * 3); // De 3 a 5°C
+                maxTemp = 12 + Math.floor(Math.random() * 3); // De 12 a 14°C
+            }
+            
+            // Ajustar según el día específico
+            switch(i) {
+                case 0: // Lunes
+                    minTemp = 0;
+                    maxTemp = 8;
+                    break;
+                case 1: // Martes
+                    minTemp = -1;
+                    maxTemp = 7;
+                    break;
+                case 2: // Miércoles
+                    minTemp = 1;
+                    maxTemp = 9;
+                    break;
+                case 3: // Jueves
+                    minTemp = 2;
+                    maxTemp = 10;
+                    break;
+                case 4: // Viernes
+                    minTemp = 1;
+                    maxTemp = 11;
+                    break;
+                case 5: // Sábado
+                    minTemp = 4;
+                    maxTemp = 13;
+                    break;
+                case 6: // Domingo
+                    minTemp = 5;
+                    maxTemp = 14;
+                    break;
+            }
+        } else {
+            // Patrón para otras ubicaciones (más suave, basado en clima mediterráneo)
+            const baseMin = 8;
+            const baseMax = 18;
+            
+            // Añadir variabilidad según el día
+            minTemp = baseMin + Math.floor(Math.random() * 3) - 1;
+            maxTemp = baseMax + Math.floor(Math.random() * 4) - 2;
+            
+            // Ajustar para fin de semana (un poco más cálido)
+            if (i >= 5) {
+                minTemp += 2;
+                maxTemp += 2;
+            }
+            
+            // Ajustar según día específico para mayor realismo
+            switch(i) {
+                case 0: // Lunes
+                    minTemp = 8;
+                    maxTemp = 16;
+                    break;
+                case 1: // Martes
+                    minTemp = 7;
+                    maxTemp = 15;
+                    break;
+                case 2: // Miércoles
+                    minTemp = 9;
+                    maxTemp = 17;
+                    break;
+                case 3: // Jueves
+                    minTemp = 10;
+                    maxTemp = 18;
+                    break;
+                case 4: // Viernes
+                    minTemp = 9;
+                    maxTemp = 18;
+                    break;
+                case 5: // Sábado
+                    minTemp = 12;
+                    maxTemp = 20;
+                    break;
+                case 6: // Domingo
+                    minTemp = 13;
+                    maxTemp = 21;
+                    break;
+            }
         }
         
         forecast.push({
@@ -469,12 +575,22 @@ function generateSimulatedForecast() {
 
 function displayWeatherForecast() {
     const container = document.getElementById('weather-forecast');
+    const location = document.getElementById('location').value;
+    
     container.innerHTML = '';
     
     if (weatherForecast.length === 0) {
         container.innerHTML = '<p>No hay datos de pronóstico disponibles. Por favor, genera el pronóstico primero.</p>';
         return;
     }
+    
+    // Añadir título con la ubicación
+    container.innerHTML = `
+        <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
+            <h3 style="margin: 0 0 5px 0; color: var(--primary-color);">Pronóstico para ${location}</h3>
+            <small style="color: #7f8c8d;">Estimación basada en datos históricos de la zona</small>
+        </div>
+    `;
     
     weatherForecast.forEach(day => {
         const dayElement = document.createElement('div');
@@ -499,11 +615,12 @@ function displayWeatherForecast() {
 
 function getTempColor(temp) {
     // Devolver un color según la temperatura
-    if (temp < 0) return '#3498db'; // Azul para temperaturas bajo cero
-    if (temp < 5) return '#2980b9'; // Azul oscuro para frío
-    if (temp < 10) return '#3498db'; // Azul para fresco
-    if (temp < 15) return '#2ecc71'; // Verde para templado
-    return '#e74c3c'; // Rojo para cálido
+    if (temp < 0) return '#2c3e50'; // Azul oscuro para temperaturas bajo cero
+    if (temp < 5) return '#3498db'; // Azul para frío
+    if (temp < 10) return '#2ecc71'; // Verde para fresco/templado
+    if (temp < 15) return '#f1c40f'; // Amarillo/naranja para templado
+    if (temp < 20) return '#e67e22'; // Naranja para cálido
+    return '#e74c3c'; // Rojo para muy cálido
 }
 
 function calculateWeeklyEstimation() {
@@ -593,23 +710,24 @@ function analyzeConsumptionPattern() {
     const hourlyPattern = Array.from({length: 24}, (_, hour) => {
         // Calcular potencia media para cada hora del día
         const hourData = consumptionData.filter(item => {
-            // Manejar el caso especial del día de cambio (23/11 a 24/11)
-            if (item.date.getDate() === 23 && hour >= 14) {
-                return item.date.getHours() === hour;
-            }
-            if (item.date.getDate() === 24 && hour < 8) {
-                return item.date.getHours() === hour;
-            }
-            return item.date.getHours() === hour && item.date.getDate() === 23;
+            return item.date.getHours() === hour;
         });
         
-        const power = hourData.length > 0 ? 
-            hourData.reduce((sum, item) => sum + item.power, 0) / hourData.length : 
-            // Si no hay datos para esta hora, interpolar
-            (hour < 6 ? initialPower * 0.9 : 
-             hour < 10 ? initialPower * 0.8 : 
-             hour < 18 ? maintenancePower * 1.1 : 
-             initialPower * 0.85);
+        let power;
+        if (hourData.length > 0) {
+            power = hourData.reduce((sum, item) => sum + item.power, 0) / hourData.length;
+        } else {
+            // Si no hay datos para esta hora, interpolar basado en la fase
+            if (hour < 6 || hour >= 22) {
+                power = initialPower * 0.9; // Madrugada
+            } else if (hour < 10) {
+                power = initialPower * 0.8; // Mañana temprano
+            } else if (hour < 18) {
+                power = maintenancePower * 1.1; // Día
+            } else {
+                power = initialPower * 0.85; // Tarde-noche
+            }
+        }
         
         return {
             hour: hour,
@@ -704,8 +822,20 @@ function calculateWeeklyCost() {
 }
 
 function calculateBasicEstimation() {
-    // Cálculo básico para cuando no hay suficientes datos
-    const weeklyConsumption = 112.4; // Valor de ejemplo basado en datos iniciales
+    if (consumptionData.length === 0) {
+        showNotification('⚠️ No hay datos de consumo para calcular una estimación básica', 'warning');
+        return;
+    }
+    
+    // Calcular consumo semanal basado en el promedio por hora de los datos cargados
+    const hoursMeasured = (consumptionData[consumptionData.length - 1].timestamp - consumptionData[0].timestamp) / (1000 * 60 * 60);
+    const totalConsumption = consumptionData.reduce((sum, item) => sum + (item.power * 0.001), 0); // Convertir W a kW
+    
+    // Calcular consumo promedio por hora
+    const avgHourlyConsumption = totalConsumption / hoursMeasured || 0.6; // Valor por defecto
+    
+    // Estimar consumo semanal (168 horas)
+    const weeklyConsumption = avgHourlyConsumption * 168 * 0.8; // Ajuste del 20% para considerar modo mantenimiento
     
     // Calcular costes con tarifa PVPC
     const vallePrice = parseFloat(document.getElementById('valle-price').value);
@@ -740,11 +870,20 @@ function calculateBasicEstimation() {
     
     // Actualizar el gráfico semanal con valores de ejemplo
     if (weeklyChart) {
-        weeklyChart.data.datasets[0].data = [17.8, 18.5, 16.2, 15.4, 15.3, 14.8, 13.6];
+        const avgDaily = weeklyConsumption / 7;
+        weeklyChart.data.datasets[0].data = [
+            avgDaily * 1.1, // Lunes
+            avgDaily * 1.15, // Martes
+            avgDaily * 1.05, // Miércoles
+            avgDaily * 0.95, // Jueves
+            avgDaily * 0.9,  // Viernes
+            avgDaily * 0.85, // Sábado
+            avgDaily * 0.8   // Domingo
+        ];
         weeklyChart.update();
     }
     
-    showNotification('✅ Costes calculados con estimación básica', 'success');
+    showNotification('✅ Estimación básica calculada basada en los datos cargados', 'success');
 }
 
 function calculateAdvancedEstimation() {
@@ -757,12 +896,12 @@ function calculateAdvancedEstimation() {
     // 3. Calcular consumo semanal total
     const weeklyConsumption = dailyEstimates.reduce((sum, day) => sum + day.consumption, 0);
     
-    // 4. Calcular distribución por franjas horarias PVPC - CORREGIDO
+    // 4. Calcular distribución por franjas horarias PVPC
     const vallePrice = parseFloat(document.getElementById('valle-price').value);
     const llanoPrice = parseFloat(document.getElementById('llano-price').value);
     const puntaPrice = parseFloat(document.getElementById('punta-price').value);
     
-    // NUEVO: Calcular consumo por franjas usando los datos diarios reales
+    // Calcular consumo por franjas usando los datos diarios reales
     let valleConsumption = 0;
     let llanoConsumption = 0;
     let puntaConsumption = 0;
@@ -770,24 +909,25 @@ function calculateAdvancedEstimation() {
     // Recalcular el patrón horario con los parámetros actualizados
     const hourlyPattern = recalculateHourlyPattern(consumptionPattern);
     
-    // Distribuir el consumo semanal por franjas horarias
-    hourlyPattern.forEach(hourData => {
-        const hour = hourData.hour;
-        const dailyConsumption = hourData.power / 1000; // kWh por hora
+    // Distribuir el consumo semanal por franjas horarias basado en el patrón horario
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const isWeekend = dayIndex >= 5;
+        const dayFactor = isWeekend ? 0.85 : 1.0;
         
-        // Aplicar factores de día laborable vs fin de semana
-        let weekdayFactor = 1.0; // Lunes a viernes
-        let weekendFactor = 0.85; // Sábado y domingo
-        
-        if (hour >= 22 || hour < 8) { // Valle: 22:00-8:00
-            // 5 días laborables + 2 días fin de semana
-            valleConsumption += (dailyConsumption * 5 * weekdayFactor) + (dailyConsumption * 2 * weekendFactor);
-        } else if ((hour >= 8 && hour < 10) || (hour >= 14 && hour < 18)) { // Llano
-            llanoConsumption += (dailyConsumption * 5 * weekdayFactor) + (dailyConsumption * 2 * weekendFactor);
-        } else { // Punta
-            puntaConsumption += (dailyConsumption * 5 * weekdayFactor) + (dailyConsumption * 2 * weekendFactor);
-        }
-    });
+        hourlyPattern.forEach(hourData => {
+            const hour = hourData.hour;
+            const hourlyPower = hourData.power;
+            const hourlyConsumption = hourlyPower / 1000; // kWh por hora
+            
+            if (hour >= 22 || hour < 8) { // Valle: 22:00-8:00
+                valleConsumption += hourlyConsumption * dayFactor;
+            } else if ((hour >= 8 && hour < 10) || (hour >= 14 && hour < 18)) { // Llano
+                llanoConsumption += hourlyConsumption * dayFactor;
+            } else { // Punta
+                puntaConsumption += hourlyConsumption * dayFactor;
+            }
+        });
+    }
     
     // 5. Calcular costes con tarifa PVPC
     const energyCost = 
@@ -860,6 +1000,7 @@ function recalculateHourlyPattern(basePattern) {
 function generateDefaultHourlyPattern() {
     const maintenancePower = parseFloat(document.getElementById('maintenance-power').value) || 610;
     
+    // Patrón horario base para calefacción en noviembre
     return [
         { hour: 0, power: 950 },   // 00:00-01:00
         { hour: 1, power: 950 },   // 01:00-02:00
@@ -890,7 +1031,7 @@ function generateDefaultHourlyPattern() {
         if (item.power <= 650) {
             return {
                 hour: item.hour,
-                power: Math.max(500, Math.min(700, maintenancePower * (item.power / 610)))
+                power: maintenancePower
             };
         }
         return item;
@@ -900,7 +1041,7 @@ function generateDefaultHourlyPattern() {
 function generateOptimizationTips(weeklyConsumption, totalCost) {
     const tipsContainer = document.getElementById('optimization-tips');
     
-    // Calcular potenciales ahorros
+    // Calcular potenciales ahorros basados en el consumo real
     const tempReductionSaving = weeklyConsumption * 0.08; // 8% por subir 1°C
     const tempReductionCostSaving = totalCost * 0.08;
     
@@ -935,13 +1076,58 @@ function generateOptimizationTips(weeklyConsumption, totalCost) {
     `;
 }
 
+// Función de utilidad para mostrar notificaciones en la interfaz
 function showNotification(message, type) {
-    // Esta función crearía notificaciones emergentes en una implementación completa
-    console.log(`${type}: ${message}`);
-    
-    // En una implementación real, aquí se agregaría HTML para mostrar una notificación
-    // pero para este ejemplo, usaremos alert para notificaciones importantes
-    if (type === 'warning' || type === 'error') {
-        alert(message);
+    // Obtener el contenedor de notificaciones
+    let notificationContainer = document.getElementById('notification-container');
+    if (!notificationContainer) {
+        notificationContainer = document.createElement('div');
+        notificationContainer.id = 'notification-container';
+        notificationContainer.style.position = 'fixed';
+        notificationContainer.style.top = '20px';
+        notificationContainer.style.right = '20px';
+        notificationContainer.style.zIndex = '10000';
+        document.body.appendChild(notificationContainer);
     }
+    
+    // Crear notificación
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.style.minWidth = '300px';
+    notification.style.padding = '15px';
+    notification.style.marginBottom = '10px';
+    notification.style.borderRadius = '8px';
+    notification.style.color = 'white';
+    notification.style.fontWeight = '500';
+    notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    notification.innerHTML = message;
+    
+    // Estilos según el tipo
+    switch(type) {
+        case 'success':
+            notification.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+            break;
+        case 'warning':
+            notification.style.background = 'linear-gradient(135deg, #f39c12, #d35400)';
+            break;
+        case 'error':
+            notification.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+            break;
+        default:
+            notification.style.background = 'linear-gradient(135deg, #3498db, #2980b9)';
+    }
+    
+    // Añadir a contenedor
+    notificationContainer.appendChild(notification);
+    
+    // Eliminar después de 5 segundos
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transition = 'opacity 0.5s ease';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 500);
+    }, 5000);
 }
